@@ -40,6 +40,12 @@ class Embedder(Task):
     """
 
     def __init__(self, *args, **kwargs):
+        """Initializes the `Embedder` task.
+
+        Args:
+            *args: Arguments passed to the base `Task` class.
+            **kwargs: Keyword arguments passed to the base `Task` class.
+        """
         super().__init__(*args, **kwargs)
 
     def compile(
@@ -50,6 +56,31 @@ class Embedder(Task):
         weighted_metrics="auto",
         **kwargs,
     ):
+        """Configures the `Embedder` task for training.
+
+        The `Embedder` task extends the default compilation signature of
+        `keras.Model.compile` with defaults for `optimizer`, `loss`, and
+        `weighted_metrics`. By default, `loss` and `weighted_metrics` are
+        set to `None` as embedders are often used for inference or with
+        custom contrastive losses (like `keras.losses.CosineSimilarity`).
+
+        To override these defaults, pass any value to these arguments.
+
+        Args:
+            optimizer: `"auto"`, an optimizer name, or a `keras.Optimizer`
+                instance. Defaults to `"auto"`, which uses `Adam(2e-5)`.
+                See `keras.Model.compile` and `keras.optimizers` for more.
+            loss: `"auto"`, a loss name, or a `keras.losses.Loss` instance.
+                Defaults to `"auto"`, which resolves to `None`. This is
+                suitable for inference, but a loss must be provided
+                for training. See `keras.Model.compile` and `keras.losses`
+                for more.
+            weighted_metrics: `"auto"`, or a list of metrics. Defaults to
+                `"auto"`, which resolves to `None`. See `keras.Model.compile`
+                and `keras.metrics` for more.
+            **kwargs: See `keras.Model.compile` for a full list of arguments
+                supported by the compile method.
+        """
         if optimizer == "auto":
             optimizer = keras.optimizers.Adam(2e-5)
         if loss == "auto":
@@ -73,6 +104,7 @@ class Embedder(Task):
             return self.embed_function
 
         self.embed_function = self.embed_step
+
         if keras.config.backend() == "openvino":
             from keras_hub.src.utils.openvino_utils import ov_infer
 
@@ -82,7 +114,8 @@ class Embedder(Task):
                     "installed or `openvino_utils.py` is not found."
                 )
 
-            fn_wrapper = lambda inputs, stop_token_ids: self.embed_step(inputs)
+            def fn_wrapper(inputs, stop_token_ids):
+                return self.embed_step(inputs)
 
             def wrapped_embed_function(inputs):
                 inputs = tree.map_structure(ops.array, inputs)
@@ -91,6 +124,7 @@ class Embedder(Task):
                 )
 
             self.embed_function = wrapped_embed_function
+
         elif keras.config.backend() == "torch":
             import torch
 
@@ -99,11 +133,13 @@ class Embedder(Task):
                     return self.embed_step(inputs)
 
             self.embed_function = wrapped_embed_function
+
         elif keras.config.backend() == "tensorflow" and not self.run_eagerly:
             jit_compile = getattr(self, "jit_compile", True)
             self.embed_function = tf.function(
                 self.embed_step, jit_compile=jit_compile
             )
+
         elif keras.config.backend() == "jax" and not self.run_eagerly:
             import jax
 
@@ -118,7 +154,7 @@ class Embedder(Task):
                     zip(self.non_trainable_variables, non_trainable_variables),
                 )
 
-                with keras.StatelessScope(state_mapping=mapping) as scope:
+                with keras.StatelessScope(state_mapping=mapping):
                     outputs = self.embed_step(inputs)
 
                 return outputs
@@ -198,6 +234,7 @@ class Embedder(Task):
             for key in outputs[0]:
                 normalized[key] = normalize([x[key] for x in outputs])
             return normalized
+
         return normalize([x for x in outputs])
 
     def embed(
@@ -252,9 +289,9 @@ class Embedder(Task):
             outputs = [postprocess(x) for x in outputs]
 
         return self._normalize_embed_outputs(outputs, input_is_scalar)
-    
+
     def export_to_transformers(self, path):
-        """Export the full CausalLM model to HuggingFace Transformers format.
+        """Export the full Embedder model to HuggingFace Transformers format.
 
         This exports the trainable model, tokenizer, and configurations in a
         format compatible with HuggingFace Transformers. For unsupported model

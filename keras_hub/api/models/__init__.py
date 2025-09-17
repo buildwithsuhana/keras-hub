@@ -208,6 +208,7 @@ from keras_hub.src.models.electra.electra_backbone import (
 from keras_hub.src.models.electra.electra_tokenizer import (
     ElectraTokenizer as ElectraTokenizer,
 )
+from keras_hub.src.models.embedder import Embedder as Embedder
 from keras_hub.src.models.esm.esm_backbone import ESMBackbone as ESM2Backbone
 from keras_hub.src.models.esm.esm_backbone import ESMBackbone as ESMBackbone
 from keras_hub.src.models.esm.esm_classifier import (
