@@ -192,8 +192,18 @@ class Gemma3Backbone(Backbone):
             )
             pooled_output = pooled_output / l2_norm
             
-            # Use self.compute_dtype to avoid dictionary hashing issues
-            pooled_output = ops.cast(pooled_output, self.compute_dtype)
+            # Manually resolve target_dtype to avoid AttributeError 
+            # or dictionary hashing issues during __init__
+            target_dtype = dtype
+            if hasattr(target_dtype, "compute_dtype"):
+                target_dtype = target_dtype.compute_dtype
+            elif isinstance(target_dtype, dict):
+                target_dtype = target_dtype.get("config", {}).get("name", "float32")
+            
+            if target_dtype is None:
+                target_dtype = "float32"
+
+            pooled_output = ops.cast(pooled_output, target_dtype)
 
             outputs = {
                 "sequence_output": sequence_output,
