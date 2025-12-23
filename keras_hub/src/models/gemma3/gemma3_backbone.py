@@ -17,180 +17,7 @@ from keras_hub.src.models.gemma3.gemma3_mean_pooling import MeanPooling
 
 @keras_hub_export("keras_hub.models.Gemma3Backbone")
 class Gemma3Backbone(Backbone):
-    """Gemma3 core network with hyperparameters.
-
-    This backbone implements the Gemma3 model architecture. Gemma3 is a
-    vision-language model (image-text in, text out). The text input is encoded
-    using an embedding layer; images are encoded using a vision transformer
-    (ViT). After encoding these two modalities, the image embeddings are placed
-    in the correct position in the text embedding sequence. The mixed sequence
-    of embeddings is then passed through transformer decoder layers.
-
-    For a higher-level object for text-generation, see
-    `keras_hub.models.Gemma3CausalLM`.
-
-    This backbone can also function as an end-to-end embedding model by
-    setting the `is_embedding_model` argument to `True`. When configured as an
-    embedding model with bi-directional attention, it matches the
-    `EmbeddingGemma` architecture.
-
-    The default constructor gives a fully customizable, randomly initialized
-    Gemma3 model with any vision encoder, number of heads, embedding dimensions,
-    and equivalent configuration for the decoder layers. To load preset
-    architectures and weights, use the `from_preset` constructor.
-
-    Args:
-        vocabulary_size: int. The size of the token vocabulary.
-        image_size: int. The resolution of the image in both width and height.
-            The input images must be square.
-        num_layers: int. The number of transformer mixed decoder layers.
-        num_query_heads: int. The number of heads for the query projections in
-            the mixed decoder attention layer.
-        num_key_value_heads: int. The number of heads for the key and value
-            projections in the mixed decoder attention layers.
-        hidden_dim: int. The size of the transformer hidden state at the end
-            of each mixed transformer layer.
-        intermediate_dim: int. The output dimension of the first Dense layer in
-            a two-layer feedforward network for each transformer decoder block.
-        head_dim: int. The size of each attention head in the mixed decoder.
-        query_head_dim_normalize: boolean. If `True` normalize the query before
-            attention with `head_dim`. If `False`, normalize the query with
-            `hidden_dim / num_query_heads`. Defaults to `True`.
-        use_query_key_norm: bool. If `True`, apply a RMS Norm layer to query and
-            key before projecting them. Defaults to `True`.
-        use_post_ffw_norm: boolean. Whether to normalize after the feedforward
-            block. Defaults to `False`.
-        use_post_attention_norm: boolean. Whether to normalize after the
-            attention block. Defaults to `False`.
-        attention_logit_soft_cap: `None` or int. Soft cap for the attention
-            logits. Defaults to `None`.
-        final_logit_soft_cap: `None` or int. Soft cap for the final logits.
-            Defaults to `None`.
-        use_sliding_window_attention: boolean. Whether to use sliding local
-          window attention. Defaults to `False`.
-        sliding_window_size: int. Size of the sliding local window. Defaults to
-            `4096`.
-        vision_encoder: A `Gemma3VisionEncoder` instance. `call()`
-            takes in images and returns corresponding sequence of embeddings. If
-            `None`, the model is a text-only model.
-        layer_norm_epsilon: float. The epsilon value user for every layer norm
-            in all transformer blocks. Defaults to `1e-6`.
-        dropout: float. Dropout probability for the Transformer decoder blocks.
-            Defaults to `0`.
-        is_embedding_model (bool, optional): If `True`, the model will function
-            as an embedding model. This adds mean pooling layer and a two-layer
-            dense projection head to the final sequence output. The model output
-            will be a dictionary containing `'sequence_output'` and
-            `'pooled_output'`. Defaults to `False`.
-        pooling_intermediate_dim (int, optional): The intermediate dimension of
-            the first dense layer in the two-layer pooling projection head.
-            Required if `is_embedding_model` is `True`. Defaults to `None`.
-        embedding_dim (int, optional): The dimension of the final projected
-            embedding. Required if `is_embedding_model` is `True`. Defaults to
-            `None`.
-        dtype: string or `keras.mixed_precision.DTypePolicy`. The dtype to use
-            for the models computations and weights. Note that some
-            computations, such as softmax and layer normalization will always
-            be done in float32 precision regardless of dtype. Defaults to
-            `bfloat16`.
-
-    Example:
-    ```python
-    # === Language Gemma3 model ===
-    input_data = {}
-    input_data["token_ids"] = np.ones(shape=(1, 300), dtype="int32")
-    input_data["padding_mask"] = (
-        np.expand_dims(np.array([1] * 280 + [0] * (300 - 280)), axis=0)
-        .astype(bool)
-    )
-
-    # Pretrained Gemma3 decoder.
-    model = keras_hub.models.Gemma3Backbone.from_preset(
-        "gemma3_instruct_4b_text"
-    )
-    model(input_data)
-
-    # Randomly initialized Gemma3 decoder with a custom config.
-    model = keras_hub.models.Gemma3Backbone(
-        vocabulary_size=262144,
-        image_size=896,
-        num_layers=34,
-        num_query_heads=8,
-        num_key_value_heads=4,
-        hidden_dim=2560,
-        intermediate_dim=10240,
-        head_dim=256,
-        query_head_dim_normalize=True,
-        use_post_ffw_norm=True,
-        use_post_attention_norm=True,
-        final_logit_soft_cap=None,
-        attention_logit_soft_cap=None,
-        sliding_window_size=1024,
-        use_sliding_window_attention=True,
-        vision_encoder=None,
-        layer_norm_epsilon=1e-06,
-        dtype="bfloat16",
-    )
-    model(input_data)
-
-    # === Vision + Language Gemma3 model ===
-    input_data = {}
-    input_data["images"] = np.ones(shape=(1, 1, 896, 896, 3))
-    input_data["token_ids"] = np.ones(shape=(1, 300), dtype="int32")
-    # images after the text part of the sequence.
-    input_data["vision_mask"] = np.expand_dims(
-        np.array([0] * 30 + [1] * 256 + [0] * 14),
-        axis=0,
-    ).astype(bool)
-    input_data["vision_indices"] = (
-        np.expand_dims(np.arange(30, 286), axis=0)
-    )
-    input_data["padding_mask"] = (
-        np.expand_dims(np.array([1] * 286 + [0] * (300 - 286)), axis=0)
-        .astype(bool)
-    )
-
-    # Pretrained Gemma3 decoder.
-    model = keras_hub.models.Gemma3Backbone.from_preset("gemma3_instruct_4b")
-    model(input_data)
-
-    # Randomly initialized Gemma3 decoder with a custom config.
-    vision_encoder = Gemma3VisionEncoder(
-        image_size=896,
-        patch_size=14,
-        num_heads=16,
-        hidden_dim=1152,
-        num_layers=27,
-        intermediate_dim=4304,
-        output_dim=2560,
-        pool_size=4,
-        layer_norm_epsilon=1e-6,
-        dtype="float32",
-    )
-
-    model = keras_hub.models.Gemma3Backbone(
-        vocabulary_size=262144,
-        image_size=896,
-        num_layers=34,
-        num_query_heads=8,
-        num_key_value_heads=4,
-        hidden_dim=2560,
-        intermediate_dim=10240,
-        head_dim=256,
-        query_head_dim_normalize=True,
-        use_post_ffw_norm=True,
-        use_post_attention_norm=True,
-        final_logit_soft_cap=None,
-        attention_logit_soft_cap=None,
-        sliding_window_size=1024,
-        use_sliding_window_attention=True,
-        vision_encoder=vision_encoder,
-        layer_norm_epsilon=1e-06,
-        dtype="bfloat16"
-    )
-    model(input_data)
-    ```
-    """
+    """Gemma3 core network with hyperparameters."""
 
     def __init__(
         self,
@@ -248,7 +75,6 @@ class Gemma3Backbone(Backbone):
 
         self.transformer_layers = []
         for i in range(num_layers):
-            # 5 local, 1 global
             sliding_window = use_sliding_window_attention and (i % 6 < 5)
             rope_wavelength = 10_000.0 if sliding_window else 1_000_000.0
             rope_scaling_factor = (
@@ -278,30 +104,14 @@ class Gemma3Backbone(Backbone):
                 name=f"decoder_block_{i}",
             )
             self.transformer_layers.append(layer)
+
         self.layer_norm = RMSNormalization(
             epsilon=layer_norm_epsilon,
             dtype=dtype,
             name="final_normalization",
         )
 
-        # === Functional Model ===
-
         # == Model inputs ==
-        if not text_only_model:
-            image_input = keras.Input(
-                shape=(None, image_size, image_size, 3),
-                name="images",
-            )
-            vision_indices_input = keras.Input(
-                shape=(None,), dtype="int32", name="vision_indices"
-            )
-            # Truth be told, this is redundant, and we can infer this from
-            # `vision_indices_input`. But it is easier to return this from
-            # the preprocessor than to compute it here.
-            vision_mask_input = keras.Input(
-                shape=(None,), dtype="int32", name="vision_mask"
-            )
-
         token_id_input = keras.Input(
             shape=(None,), dtype="int32", name="token_ids"
         )
@@ -309,29 +119,39 @@ class Gemma3Backbone(Backbone):
             shape=(None,), dtype="int32", name="padding_mask"
         )
 
-        # == Text embeddings ==
-        text_embeddings = self.token_embedding(token_id_input)
+        inputs = {
+            "token_ids": token_id_input,
+            "padding_mask": padding_mask_input,
+        }
 
-        text_embeddings = text_embeddings * ops.cast(
-            ops.sqrt(hidden_dim), text_embeddings.dtype
-        )
+        if not text_only_model:
+            image_input = keras.Input(
+                shape=(None, image_size, image_size, 3), name="images"
+            )
+            vision_indices_input = keras.Input(
+                shape=(None,), dtype="int32", name="vision_indices"
+            )
+            vision_mask_input = keras.Input(
+                shape=(None,), dtype="int32", name="vision_mask"
+            )
+            inputs.update({
+                "images": image_input,
+                "vision_indices": vision_indices_input,
+                "vision_mask": vision_mask_input,
+            })
 
-        # == Image Embeddings ==
+        # == Forward Pass ==
+        x = self.token_embedding(token_id_input)
+        x = x * ops.cast(ops.sqrt(hidden_dim), x.dtype)
+
         if not text_only_model:
             img_embeddings = self.vision_encoder(image_input)
-
-            # == Interleaving text and images ==
-            # Place image embeddings in the right position in
-            # `text_embeddings`.
             x = self.interleave_embeddings(
                 image_embeddings=img_embeddings,
-                text_embeddings=text_embeddings,
+                text_embeddings=x,
                 vision_indices=vision_indices_input,
             )
-        else:
-            x = text_embeddings
 
-        # == Decoder layers ==
         for transformer_layer in self.transformer_layers:
             x = transformer_layer(
                 x,
@@ -347,39 +167,33 @@ class Gemma3Backbone(Backbone):
                     "specified when `is_embedding_model` is `True`."
                 )
 
-            # 1. Mean Pooling over the sequence
             pooled_output = MeanPooling(dtype=dtype, name="mean_pooling")(
                 [sequence_output, padding_mask_input]
             )
 
-            # 2. First Projection (UP)
             pooled_output = layers.Dense(
                 pooling_intermediate_dim,
                 dtype=dtype,
                 name="pooling_dense_1",
-                activation=None,
                 use_bias=False,
             )(pooled_output)
 
-            # 3. Second Projection (DOWN)
             pooled_output = layers.Dense(
                 embedding_dim,
                 dtype=dtype,
                 name="embedding_projection",
-                activation=None,
                 use_bias=False,
             )(pooled_output)
 
-            # 4. L2 Normalization (CRITICAL FOR PARITY)
-            # We cast to float32 for numerical stability during the norm calculation
+            # --- L2 Normalization with Robust DType Handling ---
             pooled_output = ops.cast(pooled_output, "float32")
             l2_norm = ops.sqrt(
                 ops.sum(ops.square(pooled_output), axis=-1, keepdims=True) + 1e-12
             )
             pooled_output = pooled_output / l2_norm
             
-            # Cast back to the model's computation dtype if necessary
-            pooled_output = ops.cast(pooled_output, dtype if dtype else "float32")
+            # Use self.compute_dtype to avoid dictionary hashing issues
+            pooled_output = ops.cast(pooled_output, self.compute_dtype)
 
             outputs = {
                 "sequence_output": sequence_output,
@@ -388,19 +202,6 @@ class Gemma3Backbone(Backbone):
         else:
             outputs = sequence_output
 
-        inputs = {
-            "token_ids": token_id_input,
-            "padding_mask": padding_mask_input,
-        }
-        if not text_only_model:
-            inputs.update(
-                {
-                    "images": image_input,
-                    "vision_indices": vision_indices_input,
-                    "vision_mask": vision_mask_input,
-                }
-            )
-
         super().__init__(
             inputs=inputs,
             outputs=outputs,
@@ -408,7 +209,7 @@ class Gemma3Backbone(Backbone):
             **kwargs,
         )
 
-        # === Config ===
+        # === Config Storage ===
         self.vocabulary_size = vocabulary_size
         self.image_size = image_size
         self.num_layers = num_layers
@@ -433,14 +234,6 @@ class Gemma3Backbone(Backbone):
         self.is_embedding_model = is_embedding_model
         self.pooling_intermediate_dim = pooling_intermediate_dim
         self.embedding_dim = embedding_dim
-
-        # Keep `num_vision_tokens_per_image` as a backbone property for easy
-        # access.
-        if not text_only_model:
-            self.num_vision_tokens_per_image = (
-                self.vision_encoder.num_vision_tokens_per_image
-            )
-        # Also, the `text_only_model`.
         self.text_only_model = text_only_model
 
     def get_config(self):
@@ -461,15 +254,11 @@ class Gemma3Backbone(Backbone):
                 "use_post_attention_norm": self.use_post_attention_norm,
                 "attention_logit_soft_cap": self.attention_logit_soft_cap,
                 "final_logit_soft_cap": self.final_logit_soft_cap,
-                "use_sliding_window_attention": (
-                    self.use_sliding_window_attention
-                ),
+                "use_sliding_window_attention": self.use_sliding_window_attention,
                 "sliding_window_size": self.sliding_window_size,
                 "local_rope_scaling_factor": self.local_rope_scaling_factor,
                 "global_rope_scaling_factor": self.global_rope_scaling_factor,
-                "vision_encoder": None
-                if self.vision_encoder is None
-                else keras.layers.serialize(self.vision_encoder),
+                "vision_encoder": layers.serialize(self.vision_encoder) if self.vision_encoder else None,
                 "use_bidirectional_attention": self.use_bidirectional_attention,
                 "layer_norm_epsilon": self.layer_norm_epsilon,
                 "dropout": self.dropout,
@@ -480,22 +269,8 @@ class Gemma3Backbone(Backbone):
         )
         return config
 
-    def default_lora_layer_names(self):
-        target_names = super().default_lora_layer_names()
-
-        # Add these for `Gemma3VITAttention`.
-        if not self.text_only_model:
-            target_names += ["query_proj", "value_proj"]
-        return target_names
-
     @classmethod
     def from_config(cls, config):
-        config.update(
-            {
-                "vision_encoder": None
-                if config["vision_encoder"] is None
-                else keras.layers.deserialize(config["vision_encoder"]),
-            }
-        )
-
-        return super().from_config(config)
+        if config.get("vision_encoder") is not None:
+            config["vision_encoder"] = layers.deserialize(config["vision_encoder"])
+        return cls(**config)
