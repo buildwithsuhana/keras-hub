@@ -167,10 +167,12 @@ class Gemma3Backbone(Backbone):
                     "specified when `is_embedding_model` is `True`."
                 )
 
+            # 1. Masked Mean Pooling
             pooled_output = MeanPooling(dtype=dtype, name="mean_pooling")(
                 [sequence_output, padding_mask_input]
             )
 
+            # 2. Projection Head
             pooled_output = layers.Dense(
                 pooling_intermediate_dim,
                 dtype=dtype,
@@ -185,15 +187,14 @@ class Gemma3Backbone(Backbone):
                 use_bias=False,
             )(pooled_output)
 
-            # --- L2 Normalization with Robust DType Handling ---
+            # 3. L2 Normalization (Crucial for parity)
             pooled_output = ops.cast(pooled_output, "float32")
             l2_norm = ops.sqrt(
                 ops.sum(ops.square(pooled_output), axis=-1, keepdims=True) + 1e-12
             )
             pooled_output = pooled_output / l2_norm
             
-            # Manually resolve target_dtype to avoid AttributeError 
-            # or dictionary hashing issues during __init__
+            # Resolve target_dtype manually from input 'dtype' or its policy
             target_dtype = dtype
             if hasattr(target_dtype, "compute_dtype"):
                 target_dtype = target_dtype.compute_dtype
