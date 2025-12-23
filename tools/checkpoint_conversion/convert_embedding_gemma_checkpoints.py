@@ -1,71 +1,34 @@
-"""
-Convert a pre-trained causal Gemma3 Keras model to an Embedding Gemma model.
-
-This script takes a standard Gemma3 model designed for causal language modeling
-and adapts it for sentence embedding tasks. It modifies the model architecture
-for bi-directional attention, adds a new pooling head for generating fixed-size
-embeddings, and transfers the weights from the original model.
-
-Setup:
-```shell
-# Make sure to install the necessary libraries, including the specific
-# keras_hub package containing the Gemma3 models.
-pip install keras-hub
-pip install keras
-
-Usage:
-```shell
-cd tools/checkpoint_conversion
-python3 convert_embedding_gemma_checkpoints.py \
-    --source_preset gemma3_instruct_4b_text \
-    --output_preset embedding_gemma3_4b_en \
-    --pooling_intermediate_dim 4096 \
-    --embedding_dim 768
-"""
-
 import argparse
 import os
+import numpy as np
 
+# Set backend before importing keras
 os.environ["KERAS_BACKEND"] = "jax"
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 import keras
+from sentence_transformers import SentenceTransformer
 
 from keras_hub.src.models.gemma3.gemma3_backbone import Gemma3Backbone
 from keras_hub.src.models.gemma3.gemma3_tokenizer import Gemma3Tokenizer
-
-PRESET_MAP = {
-    "embedding_gemma3_270m_en": "gemma3_instruct_270m",
-    "embedding_gemma3_1b_en": "gemma3_instruct_1b",
-    "embedding_gemma3_4b_en": "gemma3_instruct_4b_text",
-}
-
 
 def convert_to_embedding_preset(
     source_preset,
     output_preset,
     pooling_intermediate_dim,
     embedding_dim,
+    hf_reference_model="google/embeddinggemma-300m"
 ):
     """
     Converts a standard causal Gemma3 preset to an Embedding Gemma preset.
-
-    This function loads a pre-trained causal Gemma3 backbone, reconfigures it
-    for bi-directional attention and adds a pooling head, transfers the original
-    weights, and saves the result as a new Keras Hub preset.
-
-    Args:
-        source_preset: The path or name of source causal Gemma3 preset.
-        output_preset: The path to save the new embedding model preset.
-        pooling_intermediate_dim: The intermediate dimension for the
-            pooling head's dense layer.
-        embedding_dim: The final output dimension of sentence embedding.
     """
+    print(f"Loading source preset: {source_preset}...")
     source_model = Gemma3Backbone.from_preset(source_preset)
     source_tokenizer = Gemma3Tokenizer.from_preset(source_preset)
 
     config = source_model.get_config()
 
+    # Reconfigure for embedding mode
     config["is_embedding_model"] = True
     config["use_bidirectional_attention"] = True
     config["pooling_intermediate_dim"] = pooling_intermediate_dim
@@ -76,8 +39,11 @@ def convert_to_embedding_preset(
             config["vision_encoder"]
         )
 
+    print("Initializing new Embedding model from config...")
     embedding_model = Gemma3Backbone.from_config(config)
 
+    # 1. Transfer Backbone Weights (Transformer Layers & Embeddings)
+    print("Transferring backbone weights...")
     transferred_layers = 0
     source_layer_names = {layer.name for layer in source_model.layers}
 
@@ -88,6 +54,21 @@ def convert_to_embedding_preset(
                 target_layer.set_weights(source_layer.get_weights())
                 transferred_layers += 1
 
+    # 2. Transfer Pooling Head Weights from Hugging Face Reference
+    # This is necessary because the causal model has no pooling head weights.
+    print(f"Extracting head weights from {hf_reference_model} for parity...")
+    hf_model = SentenceTransformer(hf_reference_model)
+    
+    # HF Linear layer weights are (out_dim, in_dim). Keras expects (in_dim, out_dim).
+    # Layer [2] and [3] in the ST Sequential correspond to the two dense projections.
+    dense1_w = hf_model[2].linear.weight.detach().cpu().numpy().T
+    dense2_w = hf_model[3].linear.weight.detach().cpu().numpy().T
+
+    embedding_model.get_layer("pooling_dense_1").set_weights([dense1_w])
+    embedding_model.get_layer("embedding_projection").set_weights([dense2_w])
+    print("Successfully injected pooling head weights.")
+
+    # 3. Save the new preset
     os.makedirs(output_preset, exist_ok=True)
     embedding_model.save_to_preset(output_preset)
     source_tokenizer.save_to_preset(output_preset)
@@ -104,20 +85,18 @@ if __name__ == "__main__":
         "--source_preset",
         type=str,
         required=True,
-        help="Path or name of the source causal Gemma3 preset "
-        "(e.g., 'gemma3_instruct_4b_text').",
+        help="Path or name of the source causal Gemma3 preset.",
     )
     parser.add_argument(
         "--output_preset",
         type=str,
         required=True,
-        help="Path to save the new Embedding Gemma preset "
-        "(e.g., 'embedding_gemma3_4b_en').",
+        help="Path to save the new Embedding Gemma preset.",
     )
     parser.add_argument(
         "--pooling_intermediate_dim",
         type=int,
-        default=4096,
+        default=3072, # Changed default to match 300m model specs
         help="Intermediate dimension for the pooling head's first dense layer.",
     )
     parser.add_argument(

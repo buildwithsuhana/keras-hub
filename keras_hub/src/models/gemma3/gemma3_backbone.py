@@ -347,10 +347,12 @@ class Gemma3Backbone(Backbone):
                     "specified when `is_embedding_model` is `True`."
                 )
 
+            # 1. Mean Pooling over the sequence
             pooled_output = MeanPooling(dtype=dtype, name="mean_pooling")(
                 [sequence_output, padding_mask_input]
             )
 
+            # 2. First Projection (UP)
             pooled_output = layers.Dense(
                 pooling_intermediate_dim,
                 dtype=dtype,
@@ -359,6 +361,7 @@ class Gemma3Backbone(Backbone):
                 use_bias=False,
             )(pooled_output)
 
+            # 3. Second Projection (DOWN)
             pooled_output = layers.Dense(
                 embedding_dim,
                 dtype=dtype,
@@ -366,6 +369,17 @@ class Gemma3Backbone(Backbone):
                 activation=None,
                 use_bias=False,
             )(pooled_output)
+
+            # 4. L2 Normalization (CRITICAL FOR PARITY)
+            # We cast to float32 for numerical stability during the norm calculation
+            pooled_output = ops.cast(pooled_output, "float32")
+            l2_norm = ops.sqrt(
+                ops.sum(ops.square(pooled_output), axis=-1, keepdims=True) + 1e-12
+            )
+            pooled_output = pooled_output / l2_norm
+            
+            # Cast back to the model's computation dtype if necessary
+            pooled_output = ops.cast(pooled_output, dtype if dtype else "float32")
 
             outputs = {
                 "sequence_output": sequence_output,
