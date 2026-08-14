@@ -221,8 +221,13 @@ class Bleu(keras.metrics.Metric):
         for references, translation in zip(
             reference_corpus, translation_corpus
         ):
-            reference_length += min(len(r) for r in references)
+            res_lens = [len(r) for r in references]
             translation_length += len(translation)
+            # Find the closest reference length.
+            # In case of ties, choose the shortest one.
+            reference_length += min(
+                res_lens, key=lambda x: (abs(len(translation) - x), x)
+            )
 
             merged_ref_ngram_counts = collections.Counter()
             for reference in references:
