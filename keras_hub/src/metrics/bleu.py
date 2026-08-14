@@ -323,7 +323,7 @@ class Bleu(keras.metrics.Metric):
             elif inputs.shape.rank == base_rank + 2:
                 if tf.shape(inputs)[-1] != 1:
                     raise ValueError(
-                        f"{tensor_name} is of rank {input.shape.rank}. The "
+                        f"{tensor_name} is of rank {inputs.shape.rank}. The "
                         f"last dimension must be of size 1."
                     )
                 return tf.squeeze(inputs, axis=-1)
@@ -337,9 +337,25 @@ class Bleu(keras.metrics.Metric):
         y_true = validate_and_fix_rank(y_true, "y_true", 1)
         y_pred = validate_and_fix_rank(y_pred, "y_pred", 0)
 
-        # Tokenize the inputs.
-        y_true = self._tokenizer(y_true)
-        y_pred = self._tokenizer(y_pred)
+        def wrapped_calculate_bleu_score(y_true, y_pred):
+            # Tokenize eagerly inside the py_function.
+            y_true = self._tokenizer(y_true)
+            y_pred = self._tokenizer(y_pred)
+
+            (
+                bleu_score,
+                matches,
+                possible_matches,
+                translation_length,
+                reference_length,
+            ) = self._calculate_bleu_score(y_true, y_pred)
+            return (
+                tf.cast(bleu_score, self.dtype),
+                tf.cast(matches, self.dtype),
+                tf.cast(possible_matches, self.dtype),
+                tf.cast(translation_length, self.dtype),
+                tf.cast(reference_length, self.dtype),
+            )
 
         (
             bleu_score,
@@ -347,7 +363,23 @@ class Bleu(keras.metrics.Metric):
             possible_matches,
             translation_length,
             reference_length,
-        ) = self._calculate_bleu_score(y_true, y_pred)
+        ) = tf.py_function(
+            func=wrapped_calculate_bleu_score,
+            inp=[y_true, y_pred],
+            Tout=[
+                self.dtype,
+                self.dtype,
+                self.dtype,
+                self.dtype,
+                self.dtype,
+            ],
+        )
+
+        bleu_score.set_shape(())
+        matches.set_shape((self.max_order,))
+        possible_matches.set_shape((self.max_order,))
+        translation_length.set_shape(())
+        reference_length.set_shape(())
 
         self._matches.assign(matches)
         self._possible_matches.assign(possible_matches)
